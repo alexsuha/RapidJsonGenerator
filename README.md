@@ -1,0 +1,2 @@
+# RapidJsonGenerator
+JsonSchemaConvertToCplusClass
