@@ -60,7 +60,7 @@ namespace RapidJsonUtil
 			return;
 		}
 		// write the header of the h file.
-		outputCppHeader();
+		outputCppHeader(path);
 		outputSchema(doc);
 		outputCppEnding();
 	}
@@ -72,11 +72,21 @@ namespace RapidJsonUtil
 		}
 		return false;
 	}
-	void RapidJsonCodeGenerator::outputCppHeader()
+	void RapidJsonCodeGenerator::outputCppHeader(string& path)
 	{
-		INITIATE_FILE(work_path + "\\testcpp.h")
-			WRITE_LINE("#ifndef TEST_CPP_H_")
-			WRITE_LINE("#define TEST_CPP_H_")
+		string fileName = path.substr(path.find_last_of('\\') + 1, path.find_last_of('.') - path.find_last_of('\\') - 1);
+		INITIATE_FILE(work_path + "\\" +fileName+".h")
+			for (auto& c : fileName)
+			{
+				if (c == '-')
+				{
+					c = '_';
+				}
+				else 
+					c = toupper(c);
+			}
+			WRITE_LINE("#ifndef " + fileName + "_H_")
+			WRITE_LINE("#define " + fileName + "_H_")
 			WRITE_ENTER
 			WRITE_LINE("#include <vector>")
 			WRITE_LINE("#include <string>")
@@ -117,13 +127,13 @@ namespace RapidJsonUtil
 
 	void RapidJsonCodeGenerator::outputClassDefinitionCode(const Value& object, string& className)
 	{
+		outputExtraDefinitionCode(object);
 		WRITE_CLASS_HEADER(className)
 			WRITE_LINE("public:")
 			// read properties
 			outputClassPropertiesDefinitionCode(object, className);
 		// write from json
 		WRITE_CLASS_END
-		outputExtraDefinitionCode(object);
 	}
 
 	std::vector<std::string> split(const std::string& s, const std::string& delims)
@@ -148,6 +158,51 @@ namespace RapidJsonUtil
 		// When there are no more non-spaces, we are done.
 
 		return v;
+	}
+
+	void RapidJsonCodeGenerator::enumValueFromString(string& val, string& s_val)
+	{
+		if (val[0] <= '9' && val[0] >= '0')
+		{
+			val = '_' + s_val;
+		}
+		string temp;
+		bool hasSignal = false;
+		for (auto c : val)
+		{
+			if (c == '-' || c == '.' || c == '+' || c == ' ' || c == '/' || c == '(' || c == ')' || c == '\\')
+			{
+				hasSignal = true;
+				continue;
+			}
+				//c = '_';
+			else
+				c = toupper(c);
+			if (hasSignal) {
+				temp.push_back('_');
+				hasSignal = false;
+			}
+			temp.push_back(c);
+		}
+		val = temp;
+	}
+
+	void RapidJsonCodeGenerator::correctTextFromString(string& val, string& s_val)
+	{
+		for (auto c : s_val)
+		{
+			if (c == '\\')
+			{
+				val.push_back('\\');
+			}
+			val.push_back(c);
+		}
+	}
+
+	void RapidJsonCodeGenerator::classNameFromRef(const Value& obj, string& target)
+	{
+		target = obj["$ref"].GetString();
+		target = target.substr(target.find_last_of('/') + 1, target.size() - target.find_last_of('/') - 1);
 	}
 
 	void RapidJsonCodeGenerator::outputClassPropertiesDefinitionCode(const Value& object, string& className)
@@ -177,8 +232,7 @@ namespace RapidJsonUtil
 								const Value& type_val = itr->value.GetObjectW().FindMember("items")->value;
 								if (type_val.HasMember("$ref"))
 								{
-									p.ref = type_val["$ref"].GetString();
-									p.ref = p.ref.substr(p.ref.find_last_of('/') + 1, p.ref.size() - p.ref.find_last_of('/') - 1);
+									classNameFromRef(type_val, p.ref);
 								}
 								else if (type_val.HasMember("type"))
 								{
@@ -194,6 +248,10 @@ namespace RapidJsonUtil
 										p.ref = inner_type_val.GetString();
 									}
 								}
+							}
+							else if (p.type == "object")
+							{
+								classNameFromRef(property_val, p.ref);
 							}
 							break;
 						case kArrayType:
@@ -222,8 +280,16 @@ namespace RapidJsonUtil
 						for (Value::ConstValueIterator vItr = property_val["enum"].GetArray().Begin();
 							vItr != property_val["enum"].GetArray().End(); ++vItr)
 						{
-							p.initialValue += string(vItr->GetString()) + " ";
+							p.initialValue += string(vItr->GetString()) + ",";
 						}
+						string enumName = p.name;
+						enumName[0] = toupper(enumName[0]);
+						p.ref = enumName;
+					}
+					else if (property_val.HasMember("$ref"))
+					{
+						p.type = "object";
+						classNameFromRef(property_val, p.ref);
 					}
 					properties.push_back(p);
 				}
@@ -254,27 +320,35 @@ namespace RapidJsonUtil
 						}
 						else if (vp.type == "enum")
 						{
-							string enumName = vp.name;
-							enumName[0] = toupper(enumName[0]);
-							WRITE_LINE("enum " + enumName)
+							WRITE_LINE("enum class " + vp.ref)
 								WRITE_CURLY_BRACES
 								//WRITE_LINE(vp.initialValue + "} " + vp.name + ";")
-								vector<string> enums = split(vp.initialValue, " ");
+								vector<string> enums = split(vp.initialValue, ",");
 							for (auto e : enums)
 							{
-								WRITE_LINE(e + ",")
+								// TODO: 1
+								string enum_val = e;
+								enumValueFromString(enum_val, e);
+								WRITE_LINE(enum_val + ",")
 							}
 							WRITE_LINE("} " + vp.name + ";")
 								WRITE_ENTER
-								WRITE_LINE(enumName + " fromStringTo" + enumName + "(string& s)")
+								WRITE_LINE(vp.ref + " fromStringTo" + vp.ref + "(string& s)")
 								WRITE_CURLY_BRACES
-								WRITE_LINE("if (s == \"" + enums[0] + "\") {")
-								WRITE_LINE(vp.name + " = " + enums[0] + "; }")
+								string enum_val = enums[0];
+								enumValueFromString(enum_val, enums[0]);
+								string enum_text;
+								correctTextFromString(enum_text, enums[0]);
+								WRITE_LINE("if (s == \"" + enum_text + "\") {")
+								WRITE_LINE(vp.name + " = " + vp.ref + "::" + enum_val + "; }")
 								size_t max = enums.size();
 								for (size_t i = 1; i < max; ++i)
 								{
-									WRITE_LINE("else if (s == \"" + enums[i] + "\") {")
-									WRITE_LINE(vp.name + " = " + enums[i] + "; }")
+									enum_val = enums[i];
+									enumValueFromString(enum_val, enums[i]);
+									correctTextFromString(enum_text, enums[i]);
+									WRITE_LINE("else if (s == \"" + enum_text + "\") {")
+									WRITE_LINE(vp.name + " = " + vp.ref + "::" + enum_val + "; }")
 								}
 								WRITE_CURLY_BRACES_END
 								WRITE_ENTER
@@ -293,6 +367,14 @@ namespace RapidJsonUtil
 							else if (vp.type == "boolean")
 							{
 								cplusType = "bool";
+							}
+							else if (vp.type == "object")
+							{
+								cplusType = vp.ref;
+							}
+							else if (vp.type == "number")
+							{
+								cplusType = "double";
 							}
 							WRITE_LINE(cplusType + " " + vp.name + ";")
 						}
@@ -315,13 +397,13 @@ namespace RapidJsonUtil
 				{
 					if (vp.type == "string")
 					{
-						WRITE_LINE(vp.name + " = " + "object[\"" + vp.name + "\"];")
+						WRITE_LINE(vp.name + " = " + "object[\"" + vp.name + "\"].GetString();")
 					}
 					else if (vp.type == "array")
 					{
 						// get the array object, loop iterator
-						WRITE_LINE("for (Value::ConstValueIterator vItr = property_val[\"" + vp.name + "\"].GetArray().Begin();")
-							WRITE_LINE("vItr != property_val[\"" + vp.name + "\"].GetArray().End(); ++vItr)")
+						WRITE_LINE("for (Value::ConstValueIterator vItr = object[\"" + vp.name + "\"].GetArray().Begin();")
+							WRITE_LINE("vItr != object[\"" + vp.name + "\"].GetArray().End(); ++vItr)")
 							WRITE_CURLY_BRACES
 							WRITE_LINE(" " + vp.ref + " ele;")
 							if (vp.ref == "string")
@@ -345,7 +427,11 @@ namespace RapidJsonUtil
 					{
 						string enumName = vp.name;
 						enumName[0] = toupper(enumName[0]);
-						WRITE_LINE(vp.name + " = " + "fromStringTo" + enumName +"(object[\"" + vp.name + "\"]);")
+						WRITE_LINE(vp.name + " = " + "fromStringTo" + enumName +"(string(object[\"" + vp.name + "\"].GetString()));")
+					}
+					else if (vp.type == "object")
+					{
+						WRITE_LINE(vp.name + ".fromTheJson(object[\"" + vp.name + "\"]);");
 					}
 				}
 				WRITE_CURLY_BRACES_END

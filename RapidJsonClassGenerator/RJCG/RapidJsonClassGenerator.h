@@ -36,13 +36,16 @@ namespace RapidJsonUtil
 	private:
 		void generateCodeByFile(string& path);
 		bool isNotSchema(Document& doc);
-		void outputCppHeader();
+		void outputCppHeader(string& path);
 		void outputCppEnding();
 		void outputSchema(Document& doc);
 		void outputClassDefinition(const Value& object);
 		void outputClassDefinitionCode(const Value& object, string& className);
 		void outputClassPropertiesDefinitionCode(const Value& object, string& className);
 		void outputExtraDefinitionCode(const Value& object);
+		void enumValueFromString(string& val, string& s_val);
+		void correctTextFromString(string& val, string& s_val);
+		void classNameFromRef(const Value& obj, string& target);
 
 		string work_path;
 		ofstream m_file;
