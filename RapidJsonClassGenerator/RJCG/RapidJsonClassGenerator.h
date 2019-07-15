@@ -3,6 +3,9 @@
 
 #include <string>
 #include <fstream>
+//#include <stack>
+#include <queue>
+#include <set>
 #include "rapidjson/document.h"
 
 using namespace std;
@@ -46,6 +49,8 @@ namespace RapidJsonUtil
 		void enumValueFromString(string& val, string& s_val);
 		void correctTextFromString(string& val, string& s_val);
 		void classNameFromRef(const Value& obj, string& target);
+		//void topologicalDefSort(const Value& dvals, string& className, set<string>& classSet, stack<string>& classStack);
+		void topologicalDefSort(const Value& dvals, string& className, set<string>& classSet, queue<string>& classQueue);
 
 		string work_path;
 		ofstream m_file;

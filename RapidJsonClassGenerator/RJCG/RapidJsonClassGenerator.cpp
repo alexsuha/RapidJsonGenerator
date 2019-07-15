@@ -201,6 +201,11 @@ namespace RapidJsonUtil
 
 	void RapidJsonCodeGenerator::classNameFromRef(const Value& obj, string& target)
 	{
+		if (!obj.HasMember("$ref"))
+		{
+			return;
+		}
+
 		target = obj["$ref"].GetString();
 		target = target.substr(target.find_last_of('/') + 1, target.size() - target.find_last_of('/') - 1);
 	}
@@ -438,6 +443,40 @@ namespace RapidJsonUtil
 			}
 		}
 	}
+
+	void RapidJsonCodeGenerator::topologicalDefSort(const Value& dvals, string& className, set<string>& classSet, queue<string>& classQueue)
+	{
+		classSet.insert(className);
+
+		const Value& def_val = dvals[className.c_str()];
+		const Value& pvals = def_val["properties"];
+
+		for (Value::ConstMemberIterator pitr = pvals.MemberBegin();
+			pitr != pvals.MemberEnd(); ++pitr)
+		{
+			const Value& p_val = pitr->value;
+			string proName = pitr->name.GetString();
+			string defName;
+			if (p_val.HasMember("$ref"))
+			{
+				classNameFromRef(p_val, defName);
+			}
+			else if (p_val.HasMember("items"))
+			{
+				classNameFromRef(p_val["items"], defName);
+			}
+			if (!defName.empty())
+			{
+				if (classSet.find(defName) == classSet.end())
+				{
+					topologicalDefSort(dvals, defName, classSet, classQueue);
+				}
+			}
+		}
+
+		classQueue.push(className);
+	}
+
 	void RapidJsonCodeGenerator::outputExtraDefinitionCode(const Value& object)
 	{
 		if (object.HasMember("definitions"))
@@ -445,18 +484,35 @@ namespace RapidJsonUtil
 			if (object["definitions"].GetType() == kObjectType)
 			{
 				const Value& dvals = object["definitions"];
+
+				//stack<string> classStack;
+				queue<string> classQueue;
+				set<string> classSet;
+
 				for (Value::ConstMemberIterator itr = dvals.MemberBegin();
 					itr != dvals.MemberEnd(); ++itr)
 				{
 					const Value& def_val = itr->value;
+					string defName = itr->name.GetString();
+					if (classSet.find(defName) == classSet.end())
+					{
+						topologicalDefSort(dvals, defName, classSet, classQueue);
+					}
+				}
+
+				while (!classQueue.empty())
+				{
+					string name = classQueue.front();
+					classQueue.pop();
+					
+					const Value& def_val = dvals[name.c_str()];
 					if (def_val.HasMember("title"))
 					{
 						outputClassDefinition(def_val);
 					}
 					else
 					{
-						string className = string(itr->name.GetString());
-						outputClassDefinitionCode(def_val, className);
+						outputClassDefinitionCode(def_val, name);
 					}
 				}
 			}
