@@ -44,9 +44,11 @@ namespace RapidJsonUtil
 		void outputSchema(Document& doc);
 		void outputClassDefinition(const Value& object);
 		void outputClassDefinitionCode(const Value& object, string& className);
-		void outputClassPropertiesDefinitionCode(const Value& object, string& className);
+		void outputClassPropertiesDefinitionCode(const vector<VariableProperty>& properties, string& className);
+		void getAllPropertiesFromObj(const Value& object, vector<VariableProperty>& properties);
 		void outputExtraDefinitionCode(const Value& object);
 		void enumValueFromString(string& val, string& s_val);
+		void correctValueFromString(string& val);
 		void correctTextFromString(string& val, string& s_val);
 		void classNameFromRef(const Value& obj, string& target);
 		//void topologicalDefSort(const Value& dvals, string& className, set<string>& classSet, stack<string>& classStack);

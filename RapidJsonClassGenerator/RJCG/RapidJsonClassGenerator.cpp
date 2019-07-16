@@ -128,10 +128,21 @@ namespace RapidJsonUtil
 	void RapidJsonCodeGenerator::outputClassDefinitionCode(const Value& object, string& className)
 	{
 		outputExtraDefinitionCode(object);
+		vector<VariableProperty> properties;
+		if (object.HasMember("properties"))
+		{
+			if (object["properties"].GetType() == kObjectType)
+			{
+				getAllPropertiesFromObj(object["properties"], properties);
+			}
+		}
+
 		WRITE_CLASS_HEADER(className)
 			WRITE_LINE("public:")
 			// read properties
-			outputClassPropertiesDefinitionCode(object, className);
+
+
+			outputClassPropertiesDefinitionCode(properties, className);
 		// write from json
 		WRITE_CLASS_END
 	}
@@ -175,7 +186,7 @@ namespace RapidJsonUtil
 				hasSignal = true;
 				continue;
 			}
-				//c = '_';
+			//c = '_';
 			else
 				c = toupper(c);
 			if (hasSignal) {
@@ -185,6 +196,15 @@ namespace RapidJsonUtil
 			temp.push_back(c);
 		}
 		val = temp;
+	}
+
+	void RapidJsonCodeGenerator::correctValueFromString(string& val)
+	{
+		for (auto &c : val)
+		{
+			if (c == '-')
+				c = '_';
+		}
 	}
 
 	void RapidJsonCodeGenerator::correctTextFromString(string& val, string& s_val)
@@ -210,105 +230,10 @@ namespace RapidJsonUtil
 		target = target.substr(target.find_last_of('/') + 1, target.size() - target.find_last_of('/') - 1);
 	}
 
-	void RapidJsonCodeGenerator::outputClassPropertiesDefinitionCode(const Value& object, string& className)
+	void RapidJsonCodeGenerator::outputClassPropertiesDefinitionCode(const vector<VariableProperty>& properties, string& className)
 	{
-		if (object.HasMember("properties"))
-		{
-			if (object["properties"].GetType() == kObjectType)
-			{
-				const Value& pvals = object["properties"];
-				vector<VariableProperty> properties;
-				for (Value::ConstMemberIterator itr = pvals.MemberBegin();
-					itr != pvals.MemberEnd(); ++itr)
-				{
-					VariableProperty p;
-					p.name = itr->name.GetString();
-					const Value& property_val = itr->value;
-
-					if (property_val.HasMember("type"))
-					{
-						Type type = property_val["type"].GetType();
-						switch (type)
-						{
-						case kStringType:
-							p.type = property_val["type"].GetString();
-							if (p.type == "array")
-							{
-								const Value& type_val = itr->value.GetObjectW().FindMember("items")->value;
-								if (type_val.HasMember("$ref"))
-								{
-									classNameFromRef(type_val, p.ref);
-								}
-								else if (type_val.HasMember("type"))
-								{
-									const Value& inner_type_val = type_val["type"];
-									Type _type = inner_type_val.GetType();
-									if (_type == kArrayType)
-									{
-										Value::ConstValueIterator vItr = inner_type_val.GetArray().Begin();
-										p.ref = vItr->GetString();
-									}
-									else if (_type == kStringType)
-									{
-										p.ref = inner_type_val.GetString();
-									}
-								}
-							}
-							else if (p.type == "object")
-							{
-								classNameFromRef(property_val, p.ref);
-							}
-							break;
-						case kArrayType:
-						{
-							Value::ConstValueIterator vItr = property_val["type"].GetArray().Begin();
-							p.type = vItr->GetString();
-							++vItr;
-							p.initialValue = vItr->GetString();
-							break;
-						}
-						case kNullType:
-						case kFalseType:
-						case kTrueType:
-						case kObjectType:
-						case kNumberType:
-							break;
-						default:
-							break;
-						}
-					}
-					else if (property_val.HasMember("enum"))
-					{
-						// TODO: add enum definiation.
-						p.type = "enum";
-//						p.isEnum = true;
-						for (Value::ConstValueIterator vItr = property_val["enum"].GetArray().Begin();
-							vItr != property_val["enum"].GetArray().End(); ++vItr)
-						{
-							p.initialValue += string(vItr->GetString()) + ",";
-						}
-						string enumName = p.name;
-						enumName[0] = toupper(enumName[0]);
-						p.ref = enumName;
-					}
-					else if (property_val.HasMember("$ref"))
-					{
-						p.type = "object";
-						classNameFromRef(property_val, p.ref);
-					}
-					properties.push_back(p);
-				}
-
 				// construct and destruct
 				WRITE_LINE(className + "() {")
-
-					for (auto vp : properties)
-					{
-						if (vp.initialValue != "" && vp.type != "enum")
-						{
-							WRITE_LINE(" " + vp.name + " = " + (vp.initialValue == "null" ? "nullptr" : vp.initialValue) + ";");
-						}
-					}
 				WRITE_LINE("}")
 
 					WRITE_LINE("~" + className + "() {}")
@@ -321,6 +246,7 @@ namespace RapidJsonUtil
 						{
 							//msg += "@" + vp.ref;
 							string className = vp.ref;
+							correctValueFromString(className);
 							WRITE_LINE("vector<" + className + "> " + vp.name + ";");
 						}
 						else if (vp.type == "enum")
@@ -338,7 +264,7 @@ namespace RapidJsonUtil
 							}
 							WRITE_LINE("} " + vp.name + ";")
 								WRITE_ENTER
-								WRITE_LINE(vp.ref + " fromStringTo" + vp.ref + "(string& s)")
+								WRITE_LINE(/*vp.ref + */"void fromStringTo" + vp.ref + "(string& s)")
 								WRITE_CURLY_BRACES
 								string enum_val = enums[0];
 								enumValueFromString(enum_val, enums[0]);
@@ -375,37 +301,48 @@ namespace RapidJsonUtil
 							}
 							else if (vp.type == "object")
 							{
-								cplusType = vp.ref;
+								cplusType = vp.ref == "" ? vp.name : vp.ref;
+								if (vp.ref == "")
+								{
+									cplusType[0] = toupper(cplusType[0]);
+								}
+								correctValueFromString(cplusType);
 							}
 							else if (vp.type == "number")
 							{
 								cplusType = "double";
 							}
-							WRITE_LINE(cplusType + " " + vp.name + ";")
-						}
-
-
-						if (vp.ref == "integer")
-						{
-							vp.ref = "int";
-						}
-						else if (vp.ref == "boolean")
-						{
-							vp.ref = "bool";
+							vp.ref = cplusType;
+							WRITE_LINE(vp.ref + " " + vp.name + ";")
 						}
 					}
 
 				// write deserializing
 				WRITE_LINE("void fromTheJson(const Value& object)")
 				WRITE_CURLY_BRACES
+					WRITE_LINE("if (object.IsNull()) return; ")
 				for (auto vp : properties)
 				{
 					if (vp.type == "string")
 					{
-						WRITE_LINE(vp.name + " = " + "object[\"" + vp.name + "\"].GetString();")
+						WRITE_LINE("if (object.HasMember(\"" + vp.name + "\")) " + vp.name + " = " + "object[\"" + vp.name + "\"].IsNull() ? \"\" : object[\"" + vp.name + "\"].GetString();")
+					}
+					else if (vp.type == "integer")
+					{
+						WRITE_LINE("if (object.HasMember(\"" + vp.name + "\")) " + vp.name + " = " + "object[\"" + vp.name + "\"].IsNull() ? 0 : object[\"" + vp.name + "\"].GetInt();")
+					}
+					else if (vp.type == "boolean")
+					{
+						WRITE_LINE("if (object.HasMember(\"" + vp.name + "\")) " + vp.name + " = " + "object[\"" + vp.name + "\"].IsNull() ? false : object[\"" + vp.name + "\"].GetBool();")
+					}
+					else if (vp.type == "number")
+					{
+						WRITE_LINE("if (object.HasMember(\"" + vp.name + "\")) " + vp.name + " = " + "object[\"" + vp.name + "\"].IsNull() ? 0 : object[\"" + vp.name + "\"].GetDouble();")
 					}
 					else if (vp.type == "array")
 					{
+						WRITE_LINE("if (object.HasMember(\"" + vp.name + "\"))")
+							WRITE_CURLY_BRACES
 						// get the array object, loop iterator
 						WRITE_LINE("for (Value::ConstValueIterator vItr = object[\"" + vp.name + "\"].GetArray().Begin();")
 							WRITE_LINE("vItr != object[\"" + vp.name + "\"].GetArray().End(); ++vItr)")
@@ -427,20 +364,147 @@ namespace RapidJsonUtil
 								WRITE_LINE(" ele.fromTheJson(*vItr);")
 							WRITE_LINE(" " + vp.name + ".push_back(ele);")
 							WRITE_CURLY_BRACES_END
+								WRITE_CURLY_BRACES_END
 					}
 					else if (vp.type == "enum")
 					{
 						string enumName = vp.name;
 						enumName[0] = toupper(enumName[0]);
-						WRITE_LINE(vp.name + " = " + "fromStringTo" + enumName +"(string(object[\"" + vp.name + "\"].GetString()));")
+						WRITE_LINE("if (object.HasMember(\"" + vp.name + "\")) fromStringTo" + enumName +"(string(object[\"" + vp.name + "\"].IsNull() ? \"\" : (object[\"" + vp.name + "\"].IsString() ? object[\"" + vp.name + "\"].GetString() : to_string(object[\"" + vp.name + "\"].GetDouble()))));")
 					}
 					else if (vp.type == "object")
 					{
-						WRITE_LINE(vp.name + ".fromTheJson(object[\"" + vp.name + "\"]);");
+						WRITE_LINE("if (object.HasMember(\"" + vp.name + "\")) " + vp.name + ".fromTheJson(object[\"" + vp.name + "\"]);");
 					}
 				}
 				WRITE_CURLY_BRACES_END
+	}
+
+	void RapidJsonCodeGenerator::getAllPropertiesFromObj(const Value& pvals, vector<VariableProperty>& properties)
+	{
+		//const Value& pvals = object["properties"];
+		
+		for (Value::ConstMemberIterator itr = pvals.MemberBegin();
+			itr != pvals.MemberEnd(); ++itr)
+		{
+			VariableProperty p;
+			p.name = itr->name.GetString();
+			const Value& property_val = itr->value;
+
+			if (property_val.HasMember("type"))
+			{
+				bool isInnerClass = false;
+				if (property_val.HasMember("properties"))
+				{
+					isInnerClass = true;
+				}
+				Type type = property_val["type"].GetType();
+				switch (type)
+				{
+				case kStringType:
+					p.type = property_val["type"].GetString();
+					if (p.type == "array")
+					{
+						const Value& items_val = property_val["items"];
+						if (items_val.HasMember("$ref"))
+						{
+							classNameFromRef(items_val, p.ref);
+						}
+						else if (items_val.HasMember("type"))
+						{
+							const Value& inner_type_val = items_val["type"];
+							Type _type = inner_type_val.GetType();
+							if (_type == kArrayType)
+							{
+								Value::ConstValueIterator vItr = inner_type_val.GetArray().Begin();
+								p.ref = vItr->GetString();
+							}
+							else if (_type == kStringType)
+							{
+								p.ref = inner_type_val.GetString();
+							}
+						}
+					}
+					else if (p.type == "object")
+					{
+						classNameFromRef(property_val, p.ref);
+						if (p.ref == "" && isInnerClass)
+						{
+							// TODO: generate Inner class.
+							string className = p.name;
+							className[0] = toupper(className[0]);
+							outputClassDefinitionCode(property_val, className);
+						}
+					}
+					break;
+				case kArrayType:
+				{
+					Value::ConstValueIterator vItr = property_val["type"].GetArray().Begin();
+					p.type = vItr->GetString();
+					++vItr;
+					p.initialValue = vItr->GetString();
+					if (p.type == "object" && isInnerClass)
+					{
+						// TODO: generate Inner class.
+						string className = p.name;
+						className[0] = toupper(className[0]);
+						p.ref = className;
+						outputClassDefinitionCode(property_val, className);
+					}
+					else if (p.type == "array")
+					{
+						const Value& items_val = property_val["items"];
+						if (items_val.HasMember("$ref"))
+						{
+							classNameFromRef(items_val, p.ref);
+						}
+						else if (items_val.HasMember("type"))
+						{
+							const Value& inner_type_val = items_val["type"];
+							Type _type = inner_type_val.GetType();
+							if (_type == kArrayType)
+							{
+								Value::ConstValueIterator vItr = inner_type_val.GetArray().Begin();
+								p.ref = vItr->GetString();
+							}
+							else if (_type == kStringType)
+							{
+								p.ref = inner_type_val.GetString();
+							}
+						}
+					}
+					break;
+				}
+				case kNullType:
+				case kFalseType:
+				case kTrueType:
+				case kObjectType:
+				case kNumberType:
+					break;
+				default:
+					break;
+				}
 			}
+			else if (property_val.HasMember("enum"))
+			{
+				// TODO: add enum definiation.
+				p.type = "enum";
+				//						p.isEnum = true;
+				for (Value::ConstValueIterator vItr = property_val["enum"].GetArray().Begin();
+					vItr != property_val["enum"].GetArray().End(); ++vItr)
+				{
+					p.initialValue += string(vItr->GetString()) + ",";
+				}
+				string enumName = p.name;
+				enumName[0] = toupper(enumName[0]);
+				p.ref = enumName;
+			}
+			else if (property_val.HasMember("$ref"))
+			{
+				p.type = "object";
+				classNameFromRef(property_val, p.ref);
+			}
+			properties.push_back(p);
 		}
 	}
 
@@ -512,6 +576,9 @@ namespace RapidJsonUtil
 					}
 					else
 					{
+						/*string new_name;
+						correctValueFromString(new_name, name);*/
+						correctValueFromString(name);
 						outputClassDefinitionCode(def_val, name);
 					}
 				}
